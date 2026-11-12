@@ -1,8 +1,7 @@
 # Especificação inicial — Smeagol Harness
 
 **Estado:** rascunho em implementação  
-**Implementação:** Rust, aplicação local de usuário único  
-**Referência analisada:** `akitaonrails/ai-memory`, clone em `../.tmp/adrian-harness`
+**Implementação:** Rust, aplicação local de usuário único
 
 ## 1. Objetivo
 

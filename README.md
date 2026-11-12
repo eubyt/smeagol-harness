@@ -11,7 +11,7 @@ execute `/hooks` e revise/confie nos hooks instalados.
 ## Instalação
 
 Baixe o binário da sua plataforma na página de Releases. Também é possível
-compilar com Rust 1.95 ou superior usando `cargo install --path crates/adrian-harness-cli`.
+compilar com Rust 1.95 ou superior usando `cargo install --path crates/smeagol-harness-cli`.
 
 ## Crates
 
