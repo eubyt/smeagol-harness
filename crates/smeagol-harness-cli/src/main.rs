@@ -31,9 +31,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Mostra o plano de integração sem alterar configurações.
+    /// Configure hook integration or inspect its installation plan.
+    #[command(about = "Mostra o plano de integração sem alterar configurações")]
     Setup {
-        /// Agente para instalar hooks: codex, gemini-cli, antigravity ou all.
+        /// Agent whose hooks should be configured.
+        #[arg(help = "Agente para instalar hooks: codex, gemini-cli, antigravity ou all")]
         #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity", "all"])]
         agent: String,
         #[arg(long, conflicts_with = "apply")]
@@ -41,13 +43,17 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
-    /// Cria os diretórios e o índice local de memória.
+    /// Initialize the local memory store.
+    #[command(about = "Cria os diretórios e o índice local de memória")]
     Init,
-    /// Exibe o estado básico do armazenamento local.
+    /// Report local storage status.
+    #[command(about = "Exibe o estado básico do armazenamento local")]
     Status,
-    /// Grava uma memória Markdown em um escopo explícito.
+    /// Persist a Markdown memory in an explicit scope.
+    #[command(about = "Grava uma memória Markdown em um escopo explícito")]
     Remember {
-        /// Use `profile`, `project:<id>` ou `session:<id>`.
+        /// Storage scope: profile, project:<id>, or session:<id>.
+        #[arg(help = "Use `profile`, `project:<id>` ou `session:<id>`")]
         #[arg(long)]
         scope: String,
         #[arg(long)]
@@ -57,30 +63,36 @@ enum Command {
         #[arg(long)]
         body: String,
     },
-    /// Pesquisa somente no escopo informado.
+    /// Search memories within the selected scope.
+    #[command(about = "Pesquisa somente no escopo informado")]
     Search {
         query: String,
-        /// Use `profile`, `project:<id>` ou `session:<id>`.
+        /// Storage scope: profile, project:<id>, or session:<id>.
+        #[arg(help = "Use `profile`, `project:<id>` ou `session:<id>`")]
         #[arg(long)]
         scope: String,
     },
-    /// Lê uma observação JSON do stdin, sanitiza e acrescenta ao spool local.
+    /// Read, redact, and append a JSON observation from stdin.
+    #[command(about = "Lê uma observação JSON do stdin, sanitiza e acrescenta ao spool local")]
     Capture,
-    /// Consolida observações de uma sessão em uma página Markdown.
+    /// Consolidate session observations into Markdown.
+    #[command(about = "Consolida observações de uma sessão em uma página Markdown")]
     Consolidate {
         #[arg(long)]
         project: String,
         #[arg(long)]
         session: String,
     },
-    /// Executa o adaptador chamado pelos hooks do Codex.
+    /// Handle an agent lifecycle hook payload from stdin.
+    #[command(about = "Executa o adaptador chamado pelos hooks do Codex")]
     Hook {
         #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity"])]
         agent: String,
         #[arg(long)]
         event: String,
     },
-    /// Monta um briefing de busca dentro do orçamento estimado.
+    /// Render a search briefing within an estimated token budget.
+    #[command(about = "Monta um briefing de busca dentro do orçamento estimado")]
     Brief {
         query: String,
         #[arg(long)]
@@ -88,12 +100,17 @@ enum Command {
         #[arg(long, default_value_t = 400)]
         budget: usize,
     },
-    /// Inicia o servidor MCP local (stdio por padrão; HTTP opcional).
+    /// Start the local MCP server over stdio or loopback HTTP.
+    #[command(about = "Inicia o servidor MCP local (stdio por padrão; HTTP opcional)")]
     Serve {
-        /// Transporte MCP: stdio para o Codex iniciar sob demanda, ou http para um processo independente.
+        /// Transport used by the MCP client or standalone server.
+        #[arg(
+            help = "Transporte MCP: stdio para o Codex iniciar sob demanda, ou http para um processo independente"
+        )]
         #[arg(long, value_parser = ["stdio", "http"], default_value = "stdio")]
         transport: String,
-        /// Endereço local do transporte HTTP.
+        /// Loopback address for the HTTP transport.
+        #[arg(help = "Endereço local do transporte HTTP")]
         #[arg(long, default_value = "127.0.0.1:49375")]
         bind: String,
     },

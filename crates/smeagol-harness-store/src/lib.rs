@@ -5,21 +5,23 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, params};
 use smeagol_harness_core::{MemoryRecord, MemoryScope};
 
-/// Armazenamento local: Markdown é a fonte e SQLite é um índice derivado.
+/// Local store with Markdown as the source of truth and SQLite as a derived index.
 pub struct MemoryStore {
     root: PathBuf,
 }
 
 impl MemoryStore {
+    /// Select a storage root without creating files or opening the index.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
 
+    /// Return the configured storage root without resolving or creating it.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Cria as pastas de dados e prepara a tabela de busca textual.
+    /// Create missing storage directories and initialize the full-text search table.
     pub fn initialize(&self) -> Result<()> {
         for dir in ["wiki/profile", "wiki/projects", "wiki/sessions", "db"] {
             fs::create_dir_all(self.root.join(dir)).with_context(|| {
@@ -34,7 +36,7 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Salva primeiro a página Markdown e depois atualiza o índice reconstruível.
+    /// Publish the Markdown source before updating the rebuildable search index.
     pub fn write(&self, record: &MemoryRecord) -> Result<PathBuf> {
         record.validate()?;
         self.initialize()?;
@@ -65,7 +67,7 @@ impl MemoryStore {
         Ok(page)
     }
 
-    /// Busca texto no índice; o Markdown continua sendo a fonte de verdade.
+    /// Search the derived index within the requested scope, returning up to 20 hits.
     pub fn search(
         &self,
         query: &str,
@@ -83,7 +85,7 @@ impl MemoryStore {
         if terms.is_empty() {
             bail!("a consulta precisa conter ao menos uma palavra");
         }
-        // OR tolera consultas em linguagem natural e o prefixo encontra flexões simples.
+        // OR tolerates natural-language queries; prefix matching handles word variants.
         let match_query = terms.join(" OR ");
         let mut statement = connection.prepare(
             "SELECT id, scope, title, snippet(memory_fts, 3, '[', ']', '…', 18)
@@ -98,7 +100,7 @@ impl MemoryStore {
             .context("falha ao ler resultados")
     }
 
-    /// Publica o handoff mais recente do projeto por substituição atômica.
+    /// Publish the latest project handoff, limited to 6,000 characters, using a rename.
     pub fn publish_handoff(&self, project_id: &str, content: &str) -> Result<PathBuf> {
         let directory = self.root.join("handoffs");
         fs::create_dir_all(&directory)?;
@@ -116,7 +118,7 @@ impl MemoryStore {
         Ok(destination)
     }
 
-    /// Retira atomicamente um handoff para que uma só sessão o receba.
+    /// Claim a project handoff by rename so only one session can consume it.
     pub fn claim_handoff(&self, project_id: &str) -> Result<Option<String>> {
         let directory = self.root.join("handoffs");
         let name = safe_filename(project_id);
@@ -152,7 +154,7 @@ impl MemoryStore {
     }
 }
 
-/// Resolve o diretório de dados seguindo XDG e depois o diretório do usuário.
+/// Prefer an explicit data directory, then XDG or platform-specific user storage.
 pub fn default_data_dir() -> PathBuf {
     if let Some(path) =
         std::env::var_os("SMEAGOL_HARNESS_HOME").or_else(|| std::env::var_os("ADRIAN_HARNESS_HOME"))
@@ -206,7 +208,7 @@ mod tests {
     use smeagol_harness_core::{MemoryRecord, MemoryScope};
 
     #[test]
-    fn grava_markdown_e_indexa_conteudo_para_busca() {
+    fn writes_markdown_and_indexes_content_for_search() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         let record = MemoryRecord {
@@ -228,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn busca_nao_vaza_resultados_de_outro_escopo() {
+    fn search_does_not_leak_results_from_other_scopes() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         for (id, project) in [("nota-a", "alpha"), ("nota-b", "beta")] {
@@ -250,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn busca_aceita_linguagem_natural_acentos_e_pontuacao() {
+    fn search_accepts_natural_language_accents_and_punctuation() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         store
@@ -270,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_e_entregue_uma_vez_e_fica_limitado() {
+    fn handoff_is_delivered_once_and_respects_size_limit() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         store
@@ -298,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn recusa_consulta_vazia() {
+    fn rejects_empty_search_queries() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         store.initialize().unwrap();

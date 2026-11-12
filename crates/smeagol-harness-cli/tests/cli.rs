@@ -18,7 +18,7 @@ fn run(home: &std::path::Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn init_cria_o_indice_no_home_temporario() {
+fn init_creates_the_index_in_the_temporary_data_directory() {
     let temp = tempfile::tempdir().unwrap();
     let output = run(temp.path(), &["init"]);
     assert!(
@@ -30,7 +30,7 @@ fn init_cria_o_indice_no_home_temporario() {
 }
 
 #[test]
-fn setup_plan_e_somente_leitura() {
+fn setup_plan_is_read_only() {
     let temp = tempfile::tempdir().unwrap();
     let output = run(temp.path(), &["setup", "--plan"]);
     assert!(
@@ -164,7 +164,7 @@ fn generated_antigravity_command_runs_cli_and_preserves_utf8_io() {
 }
 
 #[test]
-fn remember_e_search_operam_no_escopo_escolhido() {
+fn remember_and_search_use_the_selected_scope() {
     let temp = tempfile::tempdir().unwrap();
     let saved = run(
         temp.path(),
@@ -210,7 +210,7 @@ fn remember_e_search_operam_no_escopo_escolhido() {
 }
 
 #[test]
-fn captura_consolida_e_monta_brief_com_escopo_e_orcamento() {
+fn captures_consolidates_and_builds_a_brief_with_scope_and_budget() {
     let temp = tempfile::tempdir().unwrap();
     let input = r#"{"event":"prompt","session_id":"s1","project_id":"alpha","excerpt":"Usar SQLite para reduzir tokens na busca","captured_at":"100"}"#;
     let mut child = Command::new(env!("CARGO_BIN_EXE_smeagol-harness"))
@@ -313,7 +313,7 @@ fn run_agent_hook(
 }
 
 #[test]
-fn setup_apply_preserva_configuracao_codex_e_pode_ser_reexecutado() {
+fn setup_apply_preserves_codex_config_and_is_repeatable() {
     let temp = tempfile::tempdir().unwrap();
     let codex_home = temp.path().join("codex");
     std::fs::create_dir_all(&codex_home).unwrap();
@@ -350,7 +350,7 @@ fn setup_apply_preserva_configuracao_codex_e_pode_ser_reexecutado() {
 }
 
 #[test]
-fn hooks_codex_capturam_resumem_e_entregam_handoff_uma_vez() {
+fn codex_hooks_capture_summarize_and_deliver_handoff_once() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -451,7 +451,7 @@ fn hooks_codex_capturam_resumem_e_entregam_handoff_uma_vez() {
 }
 
 #[test]
-fn hooks_gemini_e_antigravity_normalizam_payloads_e_injetam_handoff_nativo() {
+fn gemini_and_antigravity_hooks_normalize_payloads_and_inject_native_handoffs() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();

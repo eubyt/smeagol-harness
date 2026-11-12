@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-/// Plano somente leitura para a integração com Codex.
+/// Read-only description of the Codex integration and its installation paths.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SetupPlan {
     pub codex_home: PathBuf,
@@ -14,7 +14,7 @@ pub struct SetupPlan {
     pub actions: Vec<String>,
 }
 
-/// Detecta os caminhos do Codex e descreve ações sem alterar arquivos.
+/// Resolve Codex paths and describe installation actions without writing files.
 pub fn plan_codex() -> SetupPlan {
     let codex_home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
@@ -23,7 +23,7 @@ pub fn plan_codex() -> SetupPlan {
     plan_codex_at(codex_home)
 }
 
-/// Constrói o plano para um diretório explícito, sem consultar nem alterar o ambiente.
+/// Plan installation in an explicit directory without accessing environment variables.
 pub fn plan_codex_at(codex_home: PathBuf) -> SetupPlan {
     let config_file = codex_home.join("config.toml");
     let hooks_file = codex_home.join("hooks.json");
@@ -59,7 +59,7 @@ const EVENTS: &[&str] = &[
     "SessionEnd",
 ];
 
-/// Mescla os hooks do Smeagol Harness mantendo outros eventos e handlers.
+/// Merge managed Codex hooks while preserving unrelated events and handlers.
 pub fn apply_codex_at(codex_home: PathBuf, binary: &std::path::Path) -> Result<SetupPlan> {
     let plan = plan_codex_at(codex_home);
     if let Ok(metadata) = fs::symlink_metadata(&plan.hooks_file)
@@ -412,7 +412,7 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn plano_nao_cria_arquivos_no_diretorio_detectado() {
+    fn plan_does_not_create_files_in_the_detected_directory() {
         let temp = tempfile::tempdir().unwrap();
         let plan = plan_codex_at(temp.path().to_path_buf());
         assert!(!plan.codex_detected);
@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_preserva_hooks_de_terceiros_e_e_idempotente() {
+    fn apply_preserves_third_party_hooks_and_is_idempotent() {
         let temp = tempfile::tempdir().unwrap();
         let hooks = temp.path().join("hooks.json");
         std::fs::write(
@@ -449,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_remove_somente_o_handler_proprio_dentro_de_grupo_compartilhado() {
+    fn apply_removes_only_managed_handlers_from_shared_groups() {
         let temp = tempfile::tempdir().unwrap();
         let hooks = temp.path().join("hooks.json");
         std::fs::write(
@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn reconhece_configuracao_codex_existente_sem_muda_la() {
+    fn detects_existing_codex_config_without_modifying_it() {
         let temp = tempfile::tempdir().unwrap();
         let config = temp.path().join("config.toml");
         std::fs::write(&config, "model = \"codex-mini\"\n").unwrap();
@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn instala_hooks_gemini_sem_apagar_configuracao_e_e_idempotente() {
+    fn installs_gemini_hooks_without_removing_settings_and_is_idempotent() {
         let temp = tempfile::tempdir().unwrap();
         let settings = temp.path().join("settings.json");
         std::fs::write(
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn instala_hooks_antigravity_em_grupo_proprio_e_preserva_os_demais() {
+    fn installs_antigravity_hooks_in_a_managed_group_and_preserves_other_groups() {
         let temp = tempfile::tempdir().unwrap();
         let hooks = temp.path().join("config/hooks.json");
         std::fs::create_dir_all(hooks.parent().unwrap()).unwrap();
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_recusa_grupo_de_nome_reservado_que_nao_e_seu() {
+    fn antigravity_rejects_unmanaged_groups_with_reserved_names() {
         let temp = tempfile::tempdir().unwrap();
         let hooks = temp.path().join("config/hooks.json");
         std::fs::create_dir_all(hooks.parent().unwrap()).unwrap();

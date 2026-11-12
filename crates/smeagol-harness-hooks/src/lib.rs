@@ -9,7 +9,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Evento mínimo armazenado pelo adaptador de ciclo de vida.
+/// Minimal event persisted by the lifecycle adapter.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Observation {
     pub event: String,
@@ -20,7 +20,7 @@ pub struct Observation {
     pub captured_at: String,
 }
 
-/// Converte o JSON de entrada de um hook Codex em uma observação mínima.
+/// Extract an observation without persisting raw tool arguments.
 pub fn observation_from_codex(
     event: &str,
     payload: &Value,
@@ -71,7 +71,7 @@ pub fn observation_from_codex(
     })
 }
 
-/// Remove credenciais comuns antes da persistência local.
+/// Redact recognized credential patterns before local persistence.
 pub fn sanitize_excerpt(input: &str) -> String {
     static AUTHORIZATION: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;}\]]+").unwrap());
@@ -92,7 +92,7 @@ pub fn sanitize_excerpt(input: &str) -> String {
     TOKEN.replace_all(&redacted, "[REDACTED]").into_owned()
 }
 
-/// Acrescenta um evento sanitizado ao spool JSONL.
+/// Append a redacted, size-limited event to the JSONL spool.
 pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<()> {
     observation.excerpt = truncate_chars(&sanitize_excerpt(&observation.excerpt), 4_000);
     if observation.captured_at.is_empty() {
@@ -129,7 +129,7 @@ pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<
     Ok(())
 }
 
-/// Lê observações JSONL sem remover ou alterar o spool de origem.
+/// Read observations without modifying the spool; reject malformed records.
 pub fn read_observations(spool: &Path) -> Result<Vec<Observation>> {
     let file =
         fs::File::open(spool).with_context(|| format!("falha ao abrir {}", spool.display()))?;
@@ -172,7 +172,7 @@ mod tests {
     use super::{Observation, append_observation, read_observations, sanitize_excerpt};
 
     #[test]
-    fn sanitiza_segredos_inline_e_tokens_bearer() {
+    fn redacts_inline_secrets_and_bearer_tokens() {
         let sanitized = sanitize_excerpt(
             "api_key=valor-secreto Authorization: Bearer abc123 ghp_12345678901234567890",
         );
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn spool_guarda_evento_serializado_depois_da_sanitizacao() {
+    fn spool_stores_serialized_events_after_redaction() {
         let temp = tempfile::tempdir().unwrap();
         let spool = temp.path().join("spool/events.jsonl");
         append_observation(
@@ -218,7 +218,7 @@ mod codex_tests {
     use super::observation_from_codex;
 
     #[test]
-    fn captura_prompt_mas_nao_grava_argumentos_de_ferramentas() {
+    fn captures_prompts_without_recording_tool_arguments() {
         let prompt = serde_json::json!({
             "session_id": "s1",
             "cwd": "/repo",

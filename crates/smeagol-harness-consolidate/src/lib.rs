@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use smeagol_harness_core::{MemoryRecord, MemoryScope};
 use smeagol_harness_hooks::Observation;
 
-/// Compila as observações de uma sessão em uma página Markdown determinística.
+/// Build a deterministic Markdown page from observations in the selected session.
 pub fn compile_session(
     observations: &[Observation],
     project_id: &str,
@@ -32,9 +32,9 @@ pub fn compile_session(
     })
 }
 
-/// Promove apenas frases que declaram explicitamente uma regra durável.
-/// A regra é deliberadamente conservadora: não tenta inferir decisões a partir
-/// de qualquer pedido ou resultado de ferramenta.
+/// Promote only statements that explicitly declare a durable rule.
+/// Promotion is deliberately conservative: regular requests and tool results
+/// must not be interpreted as durable decisions.
 pub fn promote_durable_memories(
     observations: &[Observation],
     project_id: &str,
@@ -91,13 +91,13 @@ pub fn promote_durable_memories(
 }
 
 fn stable_fingerprint(value: &str) -> u64 {
-    // FNV-1a serve somente para criar IDs reproduzíveis, não para segurança.
+    // FNV-1a provides reproducible identifiers, not cryptographic protection.
     value.bytes().fold(0xcbf29ce484222325, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     })
 }
 
-/// Cria um componente de caminho estável para o par projeto/sessão.
+/// Build a stable path component for a project and session pair.
 pub fn session_scope_id(project_id: &str, session_id: &str) -> String {
     let combined = format!("p-{project_id}-s-{session_id}");
     combined
@@ -118,7 +118,7 @@ mod tests {
     use smeagol_harness_hooks::Observation;
 
     #[test]
-    fn consolida_apenas_eventos_da_sessao_e_projeto_escolhidos() {
+    fn consolidates_only_events_from_the_selected_session_and_project() {
         let observations = vec![
             Observation {
                 event: "prompt".to_owned(),
@@ -142,12 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn retorna_erro_quando_a_sessao_nao_tem_observacoes() {
+    fn returns_an_error_when_the_session_has_no_observations() {
         assert!(compile_session(&[], "alpha", "s1").is_err());
     }
 
     #[test]
-    fn promove_regras_explicitamente_duraveis_e_deduplica() {
+    fn promotes_explicit_durable_rules_and_deduplicates_them() {
         let prompt = Observation {
             event: "UserPromptSubmit".to_owned(),
             session_id: "s1".to_owned(),
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn nao_promove_pedido_comum_ou_conteudo_de_outro_projeto() {
+    fn does_not_promote_regular_requests_or_content_from_other_projects() {
         let prompt = Observation {
             event: "UserPromptSubmit".to_owned(),
             session_id: "s1".to_owned(),
