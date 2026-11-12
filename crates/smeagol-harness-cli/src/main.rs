@@ -441,7 +441,8 @@ fn canonical_hook_event(agent: &str, event: &str) -> Result<&'static str> {
 fn emit_empty_hook_result(agent: &str, event: &str) {
     let output = match (agent, event) {
         ("gemini" | "gemini-cli", _) => Some(serde_json::json!({})),
-        ("antigravity", "PreToolUse" | "Stop") => Some(serde_json::json!({"decision":"allow"})),
+        ("antigravity", "PreToolUse") => Some(serde_json::json!({"decision":"allow"})),
+        ("antigravity", "Stop") => Some(serde_json::json!({"decision":"allow"})),
         ("antigravity", _) => Some(serde_json::json!({})),
         _ => None,
     };

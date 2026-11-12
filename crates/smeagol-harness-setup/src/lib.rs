@@ -166,11 +166,76 @@ pub fn user_home_dir() -> Option<PathBuf> {
 
 fn managed_handler(event: &str, agent: &str, binary: &std::path::Path) -> Value {
     let name = format!("smeagol-harness:{agent}:{event}");
-    let command = format!(
-        "{} hook --agent {agent} --event {event}",
-        shell_quote(&binary.display().to_string())
-    );
+    let command = if agent == "antigravity" {
+        antigravity_command(binary, event)
+    } else {
+        format!(
+            "{} hook --agent {agent} --event {event}",
+            shell_quote(&binary.display().to_string())
+        )
+    };
     json!({"name": name, "type": "command", "command": command, "timeout": 5000})
+}
+
+fn antigravity_command(binary: &std::path::Path, event: &str) -> String {
+    #[cfg(windows)]
+    {
+        // Keep paths off the shell command line; the encoded PowerShell script
+        // preserves spaces and Unicode in the executable path.
+        let executable = binary.display().to_string().replace('\'', "''");
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; $executable = '{executable}'; & $executable hook --agent antigravity --event {event}; exit $LASTEXITCODE"
+        );
+        let encoded = encode_base64(
+            &script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        format!(
+            "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let executable = binary.display().to_string();
+        format!(
+            "{} hook --agent antigravity --event {event}",
+            shell_quote(&executable)
+        )
+    }
+}
+
+#[cfg(windows)]
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or_default();
+        let third = chunk.get(2).copied().unwrap_or_default();
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0x03) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            encoded.push(TABLE[(((second & 0x0f) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+        if chunk.len() > 2 {
+            encoded.push(TABLE[(third & 0x3f) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+    encoded
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn base64_encoding_matches_powershell_encoded_command_format() {
+    assert_eq!(encode_base64(b"Man"), "TWFu");
+    assert_eq!(encode_base64(b"Ma"), "TWE=");
+    assert_eq!(encode_base64(b"M"), "TQ==");
 }
 
 /// Merge native Gemini CLI hooks into the user's global settings.
@@ -460,9 +525,7 @@ mod tests {
             r#"{"third-party":{"SessionStart":[{"type":"command","command":"echo keep"}]}}"#,
         )
         .unwrap();
-        let binary = temp.path().join("bin/smeagol-harness.exe");
-        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
-        std::fs::write(&binary, "fixture").unwrap();
+        let binary = temp.path().join("bin with spaces/smeagol-harness.exe");
 
         apply_antigravity_at(temp.path().to_path_buf(), &binary).unwrap();
         let first: Value = serde_json::from_slice(&std::fs::read(&hooks).unwrap()).unwrap();
@@ -482,6 +545,13 @@ mod tests {
             second["smeagol-harness-managed"]["PreToolUse"][0]["matcher"],
             ".*"
         );
+        let command = second["smeagol-harness-managed"]["PreInvocation"][0]["command"]
+            .as_str()
+            .unwrap();
+        #[cfg(windows)]
+        assert!(command.contains("-EncodedCommand "));
+        #[cfg(not(windows))]
+        assert!(command.contains(" hook --agent antigravity --event PreInvocation"));
     }
 
     #[test]
