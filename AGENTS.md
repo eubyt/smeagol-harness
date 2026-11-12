@@ -51,6 +51,8 @@ These rules apply to the entire workspace, including tests and new pull requests
 ## Tests
 
 - Tests run with one documented project-specific command.
+- Put crate tests in the crate's `tests/` directory; do not add new tests
+  inside production modules under `src/`.
 - Every new function requires a test; every bug fix requires a regression test.
 - Mock external I/O with named fake types rather than inline stubs.
 - Keep tests F.I.R.S.T.: fast, independent, repeatable, self-validating, and

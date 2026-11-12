@@ -468,9 +468,7 @@ fn atomic_replace(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_antigravity_at, apply_codex_at, apply_devin_at, apply_gemini_at, plan_codex_at,
-    };
+    use super::{apply_antigravity_at, apply_codex_at, apply_gemini_at, plan_codex_at};
     use serde_json::Value;
 
     #[test]
@@ -631,33 +629,5 @@ mod tests {
 
         assert!(apply_antigravity_at(temp.path().to_path_buf(), &binary).is_err());
         assert_eq!(std::fs::read(hooks).unwrap(), before);
-    }
-
-    #[test]
-    fn installs_devin_hooks_globally_and_preserves_other_settings() {
-        let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().join("devin/config.json");
-        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-        std::fs::write(
-            &config,
-            r#"{"model":"keep-me","hooks":{"UserPromptSubmit":[{"hooks":[{"name":"third-party","type":"command","command":"echo keep"}]}]}}"#,
-        )
-        .unwrap();
-        let binary = std::path::Path::new("/opt/tools/smeagol harness");
-        apply_devin_at(config.clone(), binary).unwrap();
-        apply_devin_at(config.clone(), binary).unwrap();
-        let document: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
-        assert_eq!(document["model"], "keep-me");
-        assert_eq!(
-            document["hooks"]["UserPromptSubmit"][0]["hooks"][0]["name"],
-            "third-party"
-        );
-        let start = &document["hooks"]["SessionStart"];
-        assert_eq!(start.as_array().unwrap().len(), 1);
-        assert_eq!(
-            start[0]["hooks"][0]["name"],
-            "smeagol-harness:devin:SessionStart"
-        );
     }
 }
