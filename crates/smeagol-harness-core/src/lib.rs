@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
-/// Escopo de uma memória persistida.
+/// Storage boundary used to isolate persisted memories.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MemoryScope {
     Profile,
@@ -11,7 +11,7 @@ pub enum MemoryScope {
 }
 
 impl MemoryScope {
-    /// Devolve o diretório relativo usado para guardar este escopo.
+    /// Return a relative storage path with scope identifiers sanitized.
     pub fn storage_path(&self) -> String {
         match self {
             Self::Profile => "profile".to_owned(),
@@ -21,7 +21,7 @@ impl MemoryScope {
     }
 }
 
-/// Registro legível que pode ser salvo no Markdown e indexado para busca.
+/// Memory record whose Markdown source can be indexed for search.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MemoryRecord {
     pub id: String,
@@ -31,7 +31,7 @@ pub struct MemoryRecord {
 }
 
 impl MemoryRecord {
-    /// Valida campos que participam de caminhos ou do cabeçalho Markdown.
+    /// Reject invalid path components and empty titles before persistence.
     pub fn validate(&self) -> Result<(), ValidationError> {
         if !valid_component(&self.id) {
             return Err(ValidationError(
@@ -52,7 +52,7 @@ impl MemoryRecord {
     }
 }
 
-/// Erro de validação de dados de domínio.
+/// Validation failure for a memory record or its storage scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ValidationError(pub &'static str);
 
@@ -71,6 +71,7 @@ fn valid_component(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
+/// Replace unsupported characters before using an identifier in a storage path.
 pub fn safe_identifier(value: &str) -> String {
     value
         .chars()
@@ -84,15 +85,15 @@ pub fn safe_identifier(value: &str) -> String {
         .collect()
 }
 
-/// Estima tokens sem assumir um tokenizer de provedor específico.
-/// A estimativa é aproximada e serve para impor um limite conservador ao briefing.
+/// Estimate token usage without depending on a provider-specific tokenizer.
+/// This heuristic guides briefing budgets; it is not an exact token count.
 pub fn estimate_tokens(text: &str) -> usize {
     text.split_whitespace()
         .map(|word| word.chars().count().div_ceil(4).max(1))
         .sum()
 }
 
-/// Deriva um identificador estável do remoto Git; usa o nome do diretório como fallback.
+/// Prefer a Git remote identity; fall back to the directory name when unavailable.
 pub fn project_id_for_cwd(cwd: &Path) -> String {
     for remote_name in ["upstream", "origin"] {
         if let Ok(output) = Command::new("git")
@@ -116,7 +117,7 @@ pub fn project_id_for_cwd(cwd: &Path) -> String {
         .unwrap_or_else(|| "project".to_owned())
 }
 
-/// Normaliza URLs HTTPS e SSH para um identificador sem host nem sufixo `.git`.
+/// Normalize HTTPS and SSH remotes without retaining the host or `.git` suffix.
 pub fn normalize_remote_identity(remote: &str) -> String {
     let path = if let Some((_, path)) = remote
         .strip_prefix("git@")
@@ -158,7 +159,7 @@ mod tests {
     use super::{MemoryRecord, MemoryScope};
 
     #[test]
-    fn aceita_registro_com_escopo_valido() {
+    fn accepts_records_with_valid_scopes() {
         let record = MemoryRecord {
             id: "decisao-cache".to_owned(),
             scope: MemoryScope::Project("meu-projeto".to_owned()),
@@ -169,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn rejeita_componentes_que_poderiam_sair_da_arvore_de_dados() {
+    fn rejects_components_that_could_escape_the_data_directory() {
         let record = MemoryRecord {
             id: "../../fora".to_owned(),
             scope: MemoryScope::Project("meu-projeto".to_owned()),
@@ -180,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn normaliza_remotos_git_para_identidades_estaveis() {
+    fn normalizes_git_remotes_to_stable_identities() {
         assert_eq!(
             super::normalize_remote_identity("https://github.com/acme/my-repo.git"),
             "acme-my-repo"
@@ -192,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn escopos_de_projeto_e_sessao_usam_diretorios_separados() {
+    fn project_and_session_scopes_use_separate_directories() {
         assert_eq!(
             MemoryScope::Project("alpha".to_owned()).storage_path(),
             "projects/alpha"

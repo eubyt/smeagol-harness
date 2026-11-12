@@ -8,6 +8,9 @@ especificação está em [`docs/SPEC.md`](docs/SPEC.md), e a instalação em
 [`docs/INSTALL.md`](docs/INSTALL.md).
 `setup --apply` adiciona hooks ao `hooks.json` do Codex; depois, abra o Codex,
 execute `/hooks` e revise/confie nos hooks instalados.
+
+Os padrões de código, comentários e validação estão em [`AGENTS.md`](AGENTS.md).
+
 ## Instalação
 
 Baixe o binário da sua plataforma na página de Releases. Também é possível

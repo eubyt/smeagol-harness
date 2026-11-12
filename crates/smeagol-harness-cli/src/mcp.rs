@@ -14,6 +14,7 @@ use smeagol_harness_store::{MemoryStore, default_data_dir};
 const MAX_HTTP_BODY: usize = 1_048_576;
 const MAX_BRIEF_BUDGET: usize = 4_000;
 
+/// Process newline-delimited MCP requests until the client closes stdin.
 pub fn serve_stdio() -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
@@ -39,6 +40,7 @@ pub fn serve_stdio() -> Result<()> {
     Ok(())
 }
 
+/// Serve MCP over HTTP on a loopback address; reject non-loopback bindings.
 pub fn serve_http(bind: &str) -> Result<()> {
     let address: SocketAddr = bind.parse().context("endereço HTTP inválido")?;
     if !address.ip().is_loopback() {
