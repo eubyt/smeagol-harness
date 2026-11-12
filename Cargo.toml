@@ -1,14 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/adrian-harness-core",
-    "crates/adrian-harness-store",
-    "crates/adrian-harness-setup",
-    "crates/adrian-harness-hooks",
-    "crates/adrian-harness-consolidate",
-    "crates/adrian-harness-cli",
+    "crates/smeagol-harness-core",
+    "crates/smeagol-harness-store",
+    "crates/smeagol-harness-setup",
+    "crates/smeagol-harness-hooks",
+    "crates/smeagol-harness-consolidate",
+    "crates/smeagol-harness-cli",
 ]
-default-members = ["crates/adrian-harness-cli"]
+default-members = ["crates/smeagol-harness-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,11 +17,11 @@ rust-version = "1.95"
 license = "MIT"
 
 [workspace.dependencies]
-smeagol-harness-core = { path = "crates/adrian-harness-core" }
-smeagol-harness-store = { path = "crates/adrian-harness-store" }
-smeagol-harness-setup = { path = "crates/adrian-harness-setup" }
-smeagol-harness-hooks = { path = "crates/adrian-harness-hooks" }
-smeagol-harness-consolidate = { path = "crates/adrian-harness-consolidate" }
+smeagol-harness-core = { path = "crates/smeagol-harness-core" }
+smeagol-harness-store = { path = "crates/smeagol-harness-store" }
+smeagol-harness-setup = { path = "crates/smeagol-harness-setup" }
+smeagol-harness-hooks = { path = "crates/smeagol-harness-hooks" }
+smeagol-harness-consolidate = { path = "crates/smeagol-harness-consolidate" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.41", features = ["bundled"] }

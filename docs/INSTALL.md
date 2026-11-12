@@ -3,7 +3,7 @@
 O Smeagol Harness requer Rust 1.95 ou superior para compilar do código. Baixe o binário pronto na página de Releases ou instale a partir do checkout:
 
 ```sh
-cargo install --path crates/adrian-harness-cli
+cargo install --path crates/smeagol-harness-cli
 smeagol-harness init
 smeagol-harness setup --agent all --plan
 smeagol-harness setup --agent all --apply
