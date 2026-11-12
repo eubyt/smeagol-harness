@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -101,9 +102,26 @@ pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<
         fs::create_dir_all(parent)
             .with_context(|| format!("falha ao criar {}", parent.display()))?;
     }
+    let mut record = serde_json::to_vec(&observation)?;
+    record.push(b'\n');
+    let lock_path = spool.with_extension(format!(
+        "{}.lock",
+        spool
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("jsonl")
+    ));
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("falha ao abrir lock {}", lock_path.display()))?;
+    lock.lock_exclusive()
+        .with_context(|| format!("falha ao bloquear spool {}", spool.display()))?;
     let mut file = OpenOptions::new().create(true).append(true).open(spool)?;
-    serde_json::to_writer(&mut file, &observation)?;
-    file.write_all(b"\n")?;
+    file.write_all(&record)?;
     file.flush()?;
     Ok(())
 }

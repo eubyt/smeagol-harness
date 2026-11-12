@@ -4,6 +4,8 @@ use std::process::{Command, Output, Stdio};
 
 use smeagol_harness_consolidate::session_scope_id;
 use smeagol_harness_core::project_id_for_cwd;
+use smeagol_harness_core::safe_identifier;
+use smeagol_harness_hooks::read_observations;
 use smeagol_harness_store::MemoryStore;
 
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
@@ -38,6 +40,69 @@ fn setup_plan_e_somente_leitura() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("somente leitura"));
     assert!(!temp.path().join("codex/hooks.json").exists());
+}
+
+#[test]
+fn capturas_concorrentes_nao_intercalam_linhas_jsonl() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let data = temp.path().join("data");
+    let workers = 32;
+
+    let children = (0..workers)
+        .map(|index| {
+            let workspace = workspace.clone();
+            let data = data.clone();
+            std::thread::spawn(move || {
+                let payload = serde_json::json!({
+                    "conversationId":"parallel-session",
+                    "workspacePaths":[workspace],
+                    "lastUserInput":format!("prompt-{index}")
+                });
+                let mut child = Command::new(env!("CARGO_BIN_EXE_smeagol-harness"))
+                    .args(["hook", "--agent", "antigravity", "--event", "PreInvocation"])
+                    .env("SMEAGOL_HARNESS_HOME", &data)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(serde_json::to_string(&payload).unwrap().as_bytes())
+                    .unwrap();
+                child.wait_with_output().unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for child in children {
+        let output = child.join().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let project = project_id_for_cwd(&workspace);
+    let spool = data
+        .join("spool/sessions")
+        .join(safe_identifier(&project))
+        .join("parallel-session.jsonl");
+    let observations = read_observations(&spool).unwrap();
+    assert_eq!(observations.len(), workers);
+    assert_eq!(
+        observations
+            .iter()
+            .map(|observation| observation.excerpt.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        workers
+    );
 }
 
 #[test]
