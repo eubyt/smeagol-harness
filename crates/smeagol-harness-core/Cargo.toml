@@ -4,3 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+toml = "0.8"
+
+[dev-dependencies]
+tempfile.workspace = true

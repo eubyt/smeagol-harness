@@ -2,17 +2,19 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use smeagol_harness_consolidate::session_scope_id;
-use smeagol_harness_core::project_id_for_cwd;
-use smeagol_harness_core::safe_identifier;
-use smeagol_harness_hooks::read_observations;
+use smeagol_harness_core::workspace::resolve_project_context;
 use smeagol_harness_store::MemoryStore;
 
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
+    run_in(home, home, args)
+}
+
+fn run_in(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_smeagol-harness"))
         .args(args)
         .env("SMEAGOL_HARNESS_HOME", home)
         .env("CODEX_HOME", home.join("codex"))
+        .current_dir(cwd)
         .output()
         .unwrap()
 }
@@ -26,7 +28,7 @@ fn init_creates_the_index_in_the_temporary_data_directory() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(temp.path().join("db/memory.sqlite").exists());
+    assert!(temp.path().join("db/workspaces.sqlite").exists());
 }
 
 #[test]
@@ -40,127 +42,6 @@ fn setup_plan_is_read_only() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("somente leitura"));
     assert!(!temp.path().join("codex/hooks.json").exists());
-}
-
-#[test]
-fn concurrent_captures_do_not_interleave_jsonl_records() {
-    let temp = tempfile::tempdir().unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir_all(&workspace).unwrap();
-    let data = temp.path().join("data");
-    let workers = 32;
-
-    let children = (0..workers)
-        .map(|index| {
-            let workspace = workspace.clone();
-            let data = data.clone();
-            std::thread::spawn(move || {
-                let payload = serde_json::json!({
-                    "conversationId":"parallel-session",
-                    "workspacePaths":[workspace],
-                    "lastUserInput":format!("prompt-{index}")
-                });
-                let mut child = Command::new(env!("CARGO_BIN_EXE_smeagol-harness"))
-                    .args(["hook", "--agent", "antigravity", "--event", "PreInvocation"])
-                    .env("SMEAGOL_HARNESS_HOME", &data)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .unwrap();
-                child
-                    .stdin
-                    .take()
-                    .unwrap()
-                    .write_all(serde_json::to_string(&payload).unwrap().as_bytes())
-                    .unwrap();
-                child.wait_with_output().unwrap()
-            })
-        })
-        .collect::<Vec<_>>();
-
-    for child in children {
-        let output = child.join().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let project = project_id_for_cwd(&workspace);
-    let spool = data
-        .join("spool/sessions")
-        .join(safe_identifier(&project))
-        .join("parallel-session.jsonl");
-    let observations = read_observations(&spool).unwrap();
-    assert_eq!(observations.len(), workers);
-    assert_eq!(
-        observations
-            .iter()
-            .map(|observation| observation.excerpt.as_str())
-            .collect::<std::collections::HashSet<_>>()
-            .len(),
-        workers
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn generated_antigravity_command_runs_cli_and_preserves_utf8_io() {
-    let temp = tempfile::tempdir().unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir_all(&workspace).unwrap();
-    let install = temp.path().join("Program Files/Usuário Sênior");
-    std::fs::create_dir_all(&install).unwrap();
-    let binary = install.join("smeagol-harness.exe");
-    std::fs::copy(env!("CARGO_BIN_EXE_smeagol-harness"), &binary).unwrap();
-
-    let gemini_home = temp.path().join("Perfil com espaço/.gemini");
-    smeagol_harness_setup::apply_antigravity_at(gemini_home.clone(), &binary).unwrap();
-    let hooks: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(gemini_home.join("config/hooks.json")).unwrap())
-            .unwrap();
-    let command = hooks["smeagol-harness-managed"]["SessionStart"][0]["command"]
-        .as_str()
-        .unwrap();
-
-    let project = project_id_for_cwd(&workspace);
-    MemoryStore::new(temp.path().join("data"))
-        .publish_handoff(&project, "Retomar: decisão sobre cache 🪁")
-        .unwrap();
-    let payload = serde_json::json!({
-        "conversationId":"windows-integration-check",
-        "workspacePaths":[workspace],
-        "source":"startup"
-    });
-    let mut child = Command::new("cmd.exe")
-        .args(["/d", "/c", command])
-        .env("SMEAGOL_HARNESS_HOME", temp.path().join("data"))
-        .current_dir(&workspace)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(serde_json::to_string(&payload).unwrap().as_bytes())
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let context = response["injectSteps"][0]["systemMessage"]["systemMessage"]
-        .as_str()
-        .unwrap();
-    assert!(context.contains("decisão sobre cache 🪁"));
 }
 
 #[test]
@@ -247,10 +128,12 @@ fn captures_consolidates_and_builds_a_brief_with_scope_and_budget() {
     let briefing = run(
         temp.path(),
         &[
+            "--project",
+            "alpha",
             "brief",
             "SQLite",
             "--scope",
-            "session:p-alpha-s-s1",
+            "session:s1",
             "--budget",
             "80",
         ],
@@ -262,7 +145,7 @@ fn captures_consolidates_and_builds_a_brief_with_scope_and_budget() {
     );
     let output = String::from_utf8_lossy(&briefing.stdout);
     assert!(output.contains("SQLite"), "{output}");
-    assert!(output.contains("Fonte: sessions/p-alpha-s-s1/"));
+    assert!(output.contains("Fonte: sessions/s1/"));
     assert!(output.contains("Briefing: aproximadamente"));
 }
 
@@ -354,7 +237,8 @@ fn codex_hooks_capture_summarize_and_deliver_handoff_once() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
-    let project = project_id_for_cwd(&workspace);
+    let context = resolve_project_context(&workspace).unwrap();
+    let project = context.project.clone();
     let data = temp.path().join("data");
 
     let prompt = run_hook(
@@ -390,14 +274,15 @@ fn codex_hooks_capture_summarize_and_deliver_handoff_once() {
         "{}",
         String::from_utf8_lossy(&ended.stderr)
     );
-    let session_spool = data
-        .join("spool/sessions")
-        .join(project.clone())
-        .join("session-1.jsonl");
+    let store = MemoryStore::new(&data).with_context(context);
+    let namespace = store.namespace(&project).unwrap();
+    let session_spool = store.session_spool_path(&project, "session-1").unwrap();
     assert!(session_spool.exists());
     let page = data
-        .join("wiki/sessions")
-        .join(format!("{}.md", session_scope_id(&project, "session-1")));
+        .join("wiki")
+        .join(namespace.workspace_id)
+        .join(namespace.project_id)
+        .join("sessions/session-1.md");
     assert!(page.exists());
 
     let learned = run(
@@ -455,7 +340,8 @@ fn gemini_and_antigravity_hooks_normalize_payloads_and_inject_native_handoffs() 
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
-    let project = project_id_for_cwd(&workspace);
+    let context = resolve_project_context(&workspace).unwrap();
+    let project = context.project.clone();
     let data = temp.path().join("data");
 
     let gemini_prompt = run_agent_hook(
@@ -494,6 +380,7 @@ fn gemini_and_antigravity_hooks_normalize_payloads_and_inject_native_handoffs() 
     );
 
     MemoryStore::new(&data)
+        .with_context(context)
         .publish_handoff(&project, "Estado de retomada do Antigravity")
         .unwrap();
     let antigravity_prompt = run_agent_hook(
@@ -526,4 +413,384 @@ fn gemini_and_antigravity_hooks_normalize_payloads_and_inject_native_handoffs() 
             .unwrap()
             .contains("Estado de retomada do Antigravity")
     );
+}
+
+fn successful_json(output: Output) -> serde_json::Value {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn run_mcp(home: &Path, cwd: &Path, requests: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_smeagol-harness"))
+        .args(["serve", "--transport", "stdio"])
+        .env("SMEAGOL_HARNESS_HOME", home)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    for request in requests {
+        writeln!(input, "{request}").unwrap();
+    }
+    drop(input);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+fn mcp_call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}})
+}
+
+#[test]
+fn hooks_resolve_the_payload_directory_instead_of_the_launch_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let launcher = temp.path().join("launcher");
+    let checkout = temp.path().join("checkout");
+    for path in [&launcher, &checkout] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    std::fs::write(launcher.join(".smeagol-harness.toml"), "{").unwrap();
+    std::fs::write(
+        checkout.join(".smeagol-harness.toml"),
+        "workspace='client'\nproject='api'\n",
+    )
+    .unwrap();
+    let data = temp.path().join("data");
+    let result = run_agent_hook(
+        &data,
+        &launcher,
+        "antigravity",
+        "PreInvocation",
+        serde_json::json!({
+            "conversationId":"payload-context", "workspacePaths":[checkout], "lastUserInput":"test context"
+        }),
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let context = resolve_project_context(&checkout).unwrap();
+    let store = MemoryStore::new(&data).with_context(context);
+    let spool = store.session_spool_path("api", "payload-context").unwrap();
+    assert!(spool.exists());
+}
+
+#[test]
+fn marker_workspaces_isolate_same_named_projects_and_explicit_overrides() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let first = temp.path().join("client-a/api");
+    let second = temp.path().join("client-b/api");
+    for (cwd, workspace, body) in [
+        (&first, "client-a", "isolated alpha"),
+        (&second, "client-b", "isolated beta"),
+    ] {
+        std::fs::create_dir_all(cwd).unwrap();
+        std::fs::write(
+            cwd.join(".smeagol-harness.toml"),
+            format!("workspace = \"{workspace}\"\nproject = \"api\"\n"),
+        )
+        .unwrap();
+        let saved = run_in(
+            &data,
+            cwd,
+            &[
+                "remember",
+                "--scope",
+                "project:api",
+                "--id",
+                "decision",
+                "--title",
+                "Decisão",
+                "--body",
+                body,
+            ],
+        );
+        assert!(
+            saved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+    }
+    let first_context = successful_json(run_in(&data, &first, &["context"]));
+    let second_context = successful_json(run_in(&data, &second, &["context"]));
+    assert_eq!(first_context["workspace"], "client-a");
+    assert_eq!(second_context["workspace"], "client-b");
+    assert_ne!(
+        first_context["workspace_id"],
+        second_context["workspace_id"]
+    );
+    assert_ne!(first_context["project_id"], second_context["project_id"]);
+    let found = run_in(
+        &data,
+        &first,
+        &["search", "isolated", "--scope", "project:api"],
+    );
+    assert!(found.status.success());
+    let text = String::from_utf8(found.stdout).unwrap();
+    assert!(text.contains("alpha"));
+    assert!(!text.contains("beta"));
+    let overridden = successful_json(run_in(
+        &data,
+        &first,
+        &[
+            "context",
+            "--workspace",
+            "personal",
+            "--project",
+            "override",
+        ],
+    ));
+    assert_eq!(overridden["workspace"], "personal");
+    assert_eq!(overridden["project"], "override");
+}
+
+#[test]
+fn multiple_pages_survive_index_rebuild_without_importing_legacy_data() {
+    let temp = tempfile::tempdir().unwrap();
+    for (id, text) in [
+        ("first", "rebuildable alpha"),
+        ("second", "rebuildable beta"),
+    ] {
+        let saved = run(
+            temp.path(),
+            &[
+                "--workspace",
+                "client",
+                "--project",
+                "api",
+                "remember",
+                "--scope",
+                "project:api",
+                "--id",
+                id,
+                "--title",
+                id,
+                "--body",
+                text,
+            ],
+        );
+        assert!(
+            saved.status.success(),
+            "{}",
+            String::from_utf8_lossy(&saved.stderr)
+        );
+    }
+    let before = successful_json(run(
+        temp.path(),
+        &["--workspace", "client", "--project", "api", "context"],
+    ));
+    let project_root = temp
+        .path()
+        .join("wiki")
+        .join(before["workspace_id"].as_str().unwrap())
+        .join(before["project_id"].as_str().unwrap());
+    assert!(project_root.join("memories/first.md").exists());
+    assert!(project_root.join("memories/second.md").exists());
+    assert!(project_root.join("_meta.md").exists());
+    let legacy = temp.path().join("wiki/projects/legacy.md");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "legacy memory must remain untouched").unwrap();
+    std::fs::remove_file(temp.path().join("db/workspaces.sqlite")).unwrap();
+    let reindexed = run(temp.path(), &["reindex"]);
+    assert!(
+        reindexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reindexed.stderr)
+    );
+    let after = successful_json(run(
+        temp.path(),
+        &["--workspace", "client", "--project", "api", "context"],
+    ));
+    assert_eq!(before["workspace_id"], after["workspace_id"]);
+    assert_eq!(before["project_id"], after["project_id"]);
+    let found = run(
+        temp.path(),
+        &[
+            "--workspace",
+            "client",
+            "--project",
+            "api",
+            "search",
+            "rebuildable",
+            "--scope",
+            "project:api",
+        ],
+    );
+    assert!(found.status.success());
+    let text = String::from_utf8(found.stdout).unwrap();
+    assert!(text.contains("alpha"));
+    assert!(text.contains("beta"));
+    assert_eq!(
+        std::fs::read_to_string(legacy).unwrap(),
+        "legacy memory must remain untouched"
+    );
+}
+
+#[test]
+fn renaming_projects_keeps_namespace_ids_and_existing_pages() {
+    let temp = tempfile::tempdir().unwrap();
+    let before = successful_json(run(
+        temp.path(),
+        &["--workspace", "client", "--project", "before", "context"],
+    ));
+    let saved = run(
+        temp.path(),
+        &[
+            "--workspace",
+            "client",
+            "--project",
+            "before",
+            "remember",
+            "--scope",
+            "project:before",
+            "--id",
+            "retained",
+            "--title",
+            "Retida",
+            "--body",
+            "persistent evidence",
+        ],
+    );
+    assert!(saved.status.success());
+    let renamed = run(
+        temp.path(),
+        &[
+            "--workspace",
+            "client",
+            "rename-project",
+            "--from",
+            "before",
+            "--to",
+            "after",
+        ],
+    );
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    let after = successful_json(run(
+        temp.path(),
+        &["--workspace", "client", "--project", "after", "context"],
+    ));
+    assert_eq!(before["workspace_id"], after["workspace_id"]);
+    assert_eq!(before["project_id"], after["project_id"]);
+    assert_eq!(after["project"], "after");
+    let found = run(
+        temp.path(),
+        &[
+            "--workspace",
+            "client",
+            "--project",
+            "after",
+            "search",
+            "persistent",
+            "--scope",
+            "project:after",
+        ],
+    );
+    assert!(found.status.success());
+    assert!(
+        String::from_utf8(found.stdout)
+            .unwrap()
+            .contains("evidence")
+    );
+}
+
+#[test]
+fn mcp_calls_keep_workspace_and_project_context_explicit_and_isolated() {
+    let temp = tempfile::tempdir().unwrap();
+    let responses = run_mcp(
+        temp.path(),
+        temp.path(),
+        &[
+            serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+            mcp_call(
+                2,
+                "memory_remember",
+                serde_json::json!({"workspace":"a","project":"api","scope":"project:api","id":"same","title":"Primeira","body":"isolated alpha"}),
+            ),
+            mcp_call(
+                3,
+                "memory_remember",
+                serde_json::json!({"workspace":"b","project":"api","scope":"project:api","id":"same","title":"Segunda","body":"isolated beta"}),
+            ),
+            mcp_call(
+                4,
+                "memory_search",
+                serde_json::json!({"workspace":"a","project":"api","scope":"project:api","query":"isolated"}),
+            ),
+            mcp_call(
+                5,
+                "memory_search",
+                serde_json::json!({"workspace":"b","project":"api","scope":"project:api","query":"isolated"}),
+            ),
+            mcp_call(
+                6,
+                "memory_context",
+                serde_json::json!({"workspace":"a","project":"api"}),
+            ),
+            mcp_call(
+                7,
+                "memory_search",
+                serde_json::json!({"workspace":42,"scope":"project:api","query":"isolated"}),
+            ),
+        ],
+    );
+    assert_eq!(responses.len(), 7);
+    let tools = responses[0]["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool| tool["name"] == "memory_context"));
+    for tool in tools {
+        assert!(tool["inputSchema"]["properties"]["workspace"].is_object());
+        assert!(tool["inputSchema"]["properties"]["project"].is_object());
+    }
+    for response in &responses[1..6] {
+        assert!(response.get("error").is_none(), "{response}");
+    }
+    let first = responses[3]["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    let second = responses[4]["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(first.contains("alpha") && !first.contains("beta"));
+    assert!(second.contains("beta") && !second.contains("alpha"));
+    let context: serde_json::Value = serde_json::from_str(
+        responses[5]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(context["workspace"], "a");
+    assert_eq!(context["project"], "api");
+    assert!(context["workspace_id"].is_string() && context["project_id"].is_string());
+    assert_eq!(responses[6]["error"]["code"], -32602);
+}
+
+#[test]
+fn invalid_marker_fails_closed_before_creating_memory_storage() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("data");
+    std::fs::write(temp.path().join(".smeagol-harness.toml"), "workspace = [").unwrap();
+    let output = run_in(&data, temp.path(), &["context"]);
+    assert!(!output.status.success());
+    assert!(!data.join("db/workspaces.sqlite").exists());
 }

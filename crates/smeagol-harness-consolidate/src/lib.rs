@@ -26,7 +26,7 @@ pub fn compile_session(
     }
     Ok(MemoryRecord {
         id: scope_id.clone(),
-        scope: MemoryScope::Session(scope_id),
+        scope: MemoryScope::Session(session_id.to_owned()),
         title: format!("Sessão {session_id} — {project_id}"),
         body,
     })

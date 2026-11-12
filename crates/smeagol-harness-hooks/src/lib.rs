@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -102,27 +101,17 @@ pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<
         fs::create_dir_all(parent)
             .with_context(|| format!("falha ao criar {}", parent.display()))?;
     }
-    let mut record = serde_json::to_vec(&observation)?;
-    record.push(b'\n');
-    let lock_path = spool.with_extension(format!(
-        "{}.lock",
-        spool
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("jsonl")
-    ));
+    let lock_path = spool.with_extension("jsonl.lock");
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("falha ao abrir lock {}", lock_path.display()))?;
-    // Keep this OS-level lock held until the complete serialized record is
-    // appended. Retain the lock file permanently: removing it can let Unix
-    // writers lock different inodes under the same pathname.
-    lock.lock_exclusive()
-        .with_context(|| format!("falha ao bloquear spool {}", spool.display()))?;
+        .open(lock_path)?;
+    // Keep the same lock file so concurrent processes never lock different inodes.
+    lock.lock()?;
+    let mut record = serde_json::to_vec(&observation)?;
+    record.push(b'\n');
     let mut file = OpenOptions::new().create(true).append(true).open(spool)?;
     file.write_all(&record)?;
     file.flush()?;
@@ -131,6 +120,15 @@ pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<
 
 /// Read observations without modifying the spool; reject malformed records.
 pub fn read_observations(spool: &Path) -> Result<Vec<Observation>> {
+    let lock_path = spool.with_extension("jsonl.lock");
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    // Readers use the writer's lock to avoid observing a partially written record.
+    lock.lock_shared()?;
     let file =
         fs::File::open(spool).with_context(|| format!("falha ao abrir {}", spool.display()))?;
     let mut observations = Vec::new();

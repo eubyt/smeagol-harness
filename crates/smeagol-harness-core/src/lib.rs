@@ -2,6 +2,9 @@ use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
+pub mod workspace;
+pub use workspace::{ProjectContext, resolve_project_context, validate_context_name};
+
 /// Storage boundary used to isolate persisted memories.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MemoryScope {
@@ -41,9 +44,12 @@ impl MemoryRecord {
         if self.title.trim().is_empty() {
             return Err(ValidationError("título não pode ser vazio"));
         }
-        if let MemoryScope::Project(id) | MemoryScope::Session(id) = &self.scope
-            && !valid_component(id)
-        {
+        let valid_scope = match &self.scope {
+            MemoryScope::Project(name) => validate_context_name(name).is_ok(),
+            MemoryScope::Session(id) => valid_component(id),
+            MemoryScope::Profile => true,
+        };
+        if !valid_scope {
             return Err(ValidationError(
                 "identificador do escopo contém caracteres inválidos",
             ));

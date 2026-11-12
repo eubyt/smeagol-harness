@@ -10,6 +10,9 @@ especificação está em [`docs/SPEC.md`](docs/SPEC.md), e a instalação em
 execute `/hooks` e revise/confie nos hooks instalados.
 
 Os padrões de código, comentários e validação estão em [`AGENTS.md`](AGENTS.md).
+Memórias são isoladas por workspace e projeto com UUIDs persistentes. Veja
+[`docs/WORKSPACES.md`](docs/WORKSPACES.md) para configurar o marcador,
+consultar o contexto e reconstruir o índice. O formato novo não migra dados antigos.
 
 ## Instalação
 
