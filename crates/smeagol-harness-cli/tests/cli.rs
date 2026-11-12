@@ -43,7 +43,7 @@ fn setup_plan_e_somente_leitura() {
 }
 
 #[test]
-fn capturas_concorrentes_nao_intercalam_linhas_jsonl() {
+fn concurrent_captures_do_not_interleave_jsonl_records() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -103,6 +103,64 @@ fn capturas_concorrentes_nao_intercalam_linhas_jsonl() {
             .len(),
         workers
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn generated_antigravity_command_runs_cli_and_preserves_utf8_io() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let install = temp.path().join("Program Files/Usuário Sênior");
+    std::fs::create_dir_all(&install).unwrap();
+    let binary = install.join("smeagol-harness.exe");
+    std::fs::copy(env!("CARGO_BIN_EXE_smeagol-harness"), &binary).unwrap();
+
+    let gemini_home = temp.path().join("Perfil com espaço/.gemini");
+    smeagol_harness_setup::apply_antigravity_at(gemini_home.clone(), &binary).unwrap();
+    let hooks: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(gemini_home.join("config/hooks.json")).unwrap())
+            .unwrap();
+    let command = hooks["smeagol-harness-managed"]["SessionStart"][0]["command"]
+        .as_str()
+        .unwrap();
+
+    let project = project_id_for_cwd(&workspace);
+    MemoryStore::new(temp.path().join("data"))
+        .publish_handoff(&project, "Retomar: decisão sobre cache 🪁")
+        .unwrap();
+    let payload = serde_json::json!({
+        "conversationId":"windows-integration-check",
+        "workspacePaths":[workspace],
+        "source":"startup"
+    });
+    let mut child = Command::new("cmd.exe")
+        .args(["/d", "/c", command])
+        .env("SMEAGOL_HARNESS_HOME", temp.path().join("data"))
+        .current_dir(&workspace)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&payload).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let context = response["injectSteps"][0]["systemMessage"]["systemMessage"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("decisão sobre cache 🪁"));
 }
 
 #[test]

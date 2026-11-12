@@ -180,9 +180,20 @@ fn managed_handler(event: &str, agent: &str, binary: &std::path::Path) -> Value 
 fn antigravity_command(binary: &std::path::Path, event: &str) -> String {
     #[cfg(windows)]
     {
+        // Keep paths off the shell command line; the encoded PowerShell script
+        // preserves spaces and Unicode in the executable path.
+        let executable = binary.display().to_string().replace('\'', "''");
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'; $executable = '{executable}'; & $executable hook --agent antigravity --event {event}; exit $LASTEXITCODE"
+        );
+        let encoded = encode_base64(
+            &script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
         format!(
-            "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File {} {event}",
-            shell_quote(&binary.display().to_string())
+            "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"
         )
     }
     #[cfg(not(windows))]
@@ -196,15 +207,35 @@ fn antigravity_command(binary: &std::path::Path, event: &str) -> String {
 }
 
 #[cfg(windows)]
-fn antigravity_wrapper_contents(executable: &std::path::Path) -> Vec<u8> {
-    let path = executable.display().to_string().replace('\'', "''");
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'\n$executable = '{path}'\n& $executable hook --agent antigravity --event $args[0]\nexit $LASTEXITCODE\n"
-    )
-    .encode_utf16()
-    .flat_map(u16::to_le_bytes)
-    .collect::<Vec<_>>();
-    [vec![0xff, 0xfe], script].concat()
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or_default();
+        let third = chunk.get(2).copied().unwrap_or_default();
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0x03) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            encoded.push(TABLE[(((second & 0x0f) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+        if chunk.len() > 2 {
+            encoded.push(TABLE[(third & 0x3f) as usize] as char);
+        } else {
+            encoded.push('=');
+        }
+    }
+    encoded
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn base64_encoding_matches_powershell_encoded_command_format() {
+    assert_eq!(encode_base64(b"Man"), "TWFu");
+    assert_eq!(encode_base64(b"Ma"), "TWE=");
+    assert_eq!(encode_base64(b"M"), "TQ==");
 }
 
 /// Merge native Gemini CLI hooks into the user's global settings.
@@ -275,13 +306,6 @@ pub fn apply_antigravity_at(gemini_home: PathBuf, binary: &std::path::Path) -> R
         );
     }
     let mut group = serde_json::Map::new();
-    #[cfg(windows)]
-    let wrapper_path = hooks_file
-        .parent()
-        .context("hooks.json sem diretório pai")?
-        .join("smeagol-harness-antigravity.ps1");
-    #[cfg(not(windows))]
-    let wrapper_path = binary.to_path_buf();
     for event in [
         "SessionStart",
         "PreInvocation",
@@ -289,7 +313,7 @@ pub fn apply_antigravity_at(gemini_home: PathBuf, binary: &std::path::Path) -> R
         "PostToolUse",
         "Stop",
     ] {
-        let handler = managed_handler(event, "antigravity", &wrapper_path);
+        let handler = managed_handler(event, "antigravity", binary);
         if matches!(event, "PreToolUse" | "PostToolUse") {
             group.insert(
                 event.to_owned(),
@@ -300,17 +324,6 @@ pub fn apply_antigravity_at(gemini_home: PathBuf, binary: &std::path::Path) -> R
         }
     }
     root.insert(key.to_owned(), Value::Object(group));
-    // Validate the complete config before touching the wrapper; publish it
-    // atomically in the user's writable config directory.
-    #[cfg(windows)]
-    {
-        let parent = wrapper_path
-            .parent()
-            .context("wrapper do Antigravity sem diretório pai")?;
-        fs::create_dir_all(parent)
-            .with_context(|| format!("falha ao criar diretório {}", parent.display()))?;
-        atomic_replace(&wrapper_path, &antigravity_wrapper_contents(binary))?;
-    }
     write_json_atomic(&hooks_file, &document)?;
     Ok(hooks_file)
 }
@@ -397,8 +410,6 @@ fn atomic_replace(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::{apply_antigravity_at, apply_codex_at, apply_gemini_at, plan_codex_at};
     use serde_json::Value;
-    #[cfg(windows)]
-    use std::io::Write;
 
     #[test]
     fn plano_nao_cria_arquivos_no_diretorio_detectado() {
@@ -538,25 +549,7 @@ mod tests {
             .as_str()
             .unwrap();
         #[cfg(windows)]
-        {
-            assert!(command.contains("powershell.exe"));
-            assert!(command.contains("smeagol-harness-antigravity.ps1"));
-            assert!(
-                hooks
-                    .with_file_name("smeagol-harness-antigravity.ps1")
-                    .exists()
-            );
-            assert!(!binary.parent().unwrap().exists());
-            let contents = super::antigravity_wrapper_contents(&binary);
-            let decoded = String::from_utf16_lossy(
-                &contents
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                    .collect::<Vec<_>>(),
-            );
-            assert!(decoded.contains("bin with spaces"));
-            assert!(decoded.contains("smeagol-harness.exe"));
-        }
+        assert!(command.contains("-EncodedCommand "));
         #[cfg(not(windows))]
         assert!(command.contains(" hook --agent antigravity --event PreInvocation"));
     }
@@ -576,75 +569,5 @@ mod tests {
 
         assert!(apply_antigravity_at(temp.path().to_path_buf(), &binary).is_err());
         assert_eq!(std::fs::read(hooks).unwrap(), before);
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn config_invalida_nao_sobrescreve_wrapper_antigo() {
-        let temp = tempfile::tempdir().unwrap();
-        let gemini_home = temp.path().join("home com espaço");
-        let config = gemini_home.join("config");
-        std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("hooks.json"), "{").unwrap();
-        let wrapper = config.join("smeagol-harness-antigravity.ps1");
-        std::fs::write(&wrapper, b"previous wrapper").unwrap();
-        let binary = temp
-            .path()
-            .join("Program Files/Usuário/smeagol-harness.exe");
-
-        assert!(apply_antigravity_at(gemini_home, &binary).is_err());
-        assert_eq!(std::fs::read(wrapper).unwrap(), b"previous wrapper");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn wrapper_preserva_io_com_caminho_com_espacos_e_unicode() {
-        use std::process::{Command, Stdio};
-
-        let temp = tempfile::tempdir().unwrap();
-        let install = temp.path().join("Program Files/Usuário Sênior");
-        let config = temp.path().join("Perfil com espaço/Configuração");
-        std::fs::create_dir_all(&install).unwrap();
-        std::fs::create_dir_all(&config).unwrap();
-        let fixture = install.join("harness fixture.cmd");
-        std::fs::write(
-            &fixture,
-            "@echo off\r\nset /p input=\r\necho recebido:%input%\r\nexit /b 7\r\n",
-        )
-        .unwrap();
-        let wrapper = config.join("smeagol-harness-antigravity.ps1");
-        super::atomic_replace(&wrapper, &super::antigravity_wrapper_contents(&fixture)).unwrap();
-
-        let mut child = Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(&wrapper)
-            .arg("PreInvocation")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(b"entrada de teste\n")
-            .unwrap();
-        let output = child.wait_with_output().unwrap();
-
-        assert_eq!(output.status.code(), Some(7));
-        assert!(String::from_utf8_lossy(&output.stdout).contains("recebido:entrada de teste"));
-        assert!(
-            output.stderr.is_empty(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
     }
 }

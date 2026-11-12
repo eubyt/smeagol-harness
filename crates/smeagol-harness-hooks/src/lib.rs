@@ -118,6 +118,9 @@ pub fn append_observation(spool: &Path, mut observation: Observation) -> Result<
         .truncate(false)
         .open(&lock_path)
         .with_context(|| format!("falha ao abrir lock {}", lock_path.display()))?;
+    // Keep this OS-level lock held until the complete serialized record is
+    // appended. Retain the lock file permanently: removing it can let Unix
+    // writers lock different inodes under the same pathname.
     lock.lock_exclusive()
         .with_context(|| format!("falha ao bloquear spool {}", spool.display()))?;
     let mut file = OpenOptions::new().create(true).append(true).open(spool)?;

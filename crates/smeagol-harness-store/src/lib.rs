@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_com_bytes_invalidos_e_lido_com_utf8_valido() {
+    fn handoff_with_invalid_bytes_is_decoded_lossily() {
         let temp = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(temp.path());
         let handoffs = temp.path().join("handoffs");
