@@ -1,5 +1,9 @@
 # Instalação do Smeagol Harness
 
+O armazenamento atual usa namespaces de workspace/projeto e o banco
+`db/workspaces.sqlite`. Os arquivos do formato anterior não são migrados.
+Configure o projeto conforme [`WORKSPACES.md`](WORKSPACES.md).
+
 O Smeagol Harness requer Rust 1.95 ou superior para compilar do código. Baixe o binário pronto na página de Releases ou instale a partir do checkout:
 
 ```sh

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use smeagol_harness_core::workspace::ProjectContext;
 use smeagol_harness_core::{MemoryRecord, MemoryScope, estimate_tokens};
 use smeagol_harness_store::{MemoryStore, default_data_dir};
 
@@ -15,7 +16,7 @@ const MAX_HTTP_BODY: usize = 1_048_576;
 const MAX_BRIEF_BUDGET: usize = 4_000;
 
 /// Process newline-delimited MCP requests until the client closes stdin.
-pub fn serve_stdio() -> Result<()> {
+pub fn serve_stdio(context: ProjectContext) -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -24,7 +25,7 @@ pub fn serve_stdio() -> Result<()> {
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => dispatch(&request),
+            Ok(request) => dispatch(&request, &context),
             Err(error) => Some(json_rpc_error(
                 Value::Null,
                 -32700,
@@ -41,7 +42,7 @@ pub fn serve_stdio() -> Result<()> {
 }
 
 /// Serve MCP over HTTP on a loopback address; reject non-loopback bindings.
-pub fn serve_http(bind: &str) -> Result<()> {
+pub fn serve_http(bind: &str, context: ProjectContext) -> Result<()> {
     let address: SocketAddr = bind.parse().context("endereço HTTP inválido")?;
     if !address.ip().is_loopback() {
         bail!("o servidor HTTP aceita somente endereços loopback para manter a memória local");
@@ -55,7 +56,7 @@ pub fn serve_http(bind: &str) -> Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(error) = handle_http(stream) {
+                if let Err(error) = handle_http(stream, &context) {
                     eprintln!("requisição MCP HTTP recusada: {error:#}");
                 }
             }
@@ -65,7 +66,7 @@ pub fn serve_http(bind: &str) -> Result<()> {
     Ok(())
 }
 
-fn handle_http(mut stream: TcpStream) -> Result<()> {
+fn handle_http(mut stream: TcpStream, context: &ProjectContext) -> Result<()> {
     stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(10)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -122,7 +123,7 @@ fn handle_http(mut stream: TcpStream) -> Result<()> {
             return write_http(&mut stream, 200, "application/json", &bytes);
         }
     };
-    match dispatch(&request) {
+    match dispatch(&request, context) {
         Some(response) => {
             let bytes = serde_json::to_vec(&response)?;
             write_http(&mut stream, 200, "application/json", &bytes)
@@ -150,7 +151,7 @@ fn write_http(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u
     Ok(())
 }
 
-fn dispatch(request: &Value) -> Option<Value> {
+fn dispatch(request: &Value, context: &ProjectContext) -> Option<Value> {
     let id = request.get("id").cloned();
     if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return id.map(|id| json_rpc_error(id, -32600, "jsonrpc deve ser '2.0'"));
@@ -158,9 +159,7 @@ fn dispatch(request: &Value) -> Option<Value> {
     let Some(method) = request.get("method").and_then(Value::as_str) else {
         return id.map(|id| json_rpc_error(id, -32600, "requisição JSON-RPC inválida"));
     };
-    let Some(id) = id else {
-        return None;
-    };
+    let id = id?;
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
     let result = match method {
         "initialize" => Ok(json!({
@@ -172,7 +171,7 @@ fn dispatch(request: &Value) -> Option<Value> {
         "notifications/initialized" => return None,
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tool_definitions()})),
-        "tools/call" => call_tool(&params),
+        "tools/call" => call_tool(&params, context),
         _ => return Some(json_rpc_error(id, -32601, "método não encontrado")),
     };
     Some(match result {
@@ -186,15 +185,28 @@ fn json_rpc_error(id: Value, code: i64, message: &str) -> Value {
 }
 
 fn tool_definitions() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
+        json!({"name":"memory_context", "description":"Mostra os nomes e UUIDs do workspace e projeto efetivos.", "inputSchema":{"type":"object", "properties":{}, "additionalProperties":false}}),
         json!({"name":"memory_status", "description":"Mostra o estado do armazenamento de memória local.", "inputSchema":{"type":"object", "properties":{}, "additionalProperties":false}}),
         json!({"name":"memory_search", "description":"Pesquisa memórias somente no escopo explicitamente indicado.", "inputSchema":{"type":"object", "properties":{"query":{"type":"string","minLength":1},"scope":{"type":"string","description":"profile, project:<id> ou session:<id>"}}, "required":["query","scope"], "additionalProperties":false}}),
         json!({"name":"memory_remember", "description":"Salva uma memória durável em Markdown no escopo informado.", "inputSchema":{"type":"object", "properties":{"scope":{"type":"string","description":"profile, project:<id> ou session:<id>"},"id":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"}}, "required":["scope","id","title","body"], "additionalProperties":false}}),
         json!({"name":"memory_brief", "description":"Monta um briefing conciso de memórias relevantes dentro do orçamento aproximado de tokens.", "inputSchema":{"type":"object", "properties":{"query":{"type":"string","minLength":1},"scope":{"type":"string"},"budget":{"type":"integer","minimum":1,"maximum":4000}}, "required":["query","scope"], "additionalProperties":false}}),
-    ]
+    ];
+    for tool in &mut tools {
+        let properties = tool["inputSchema"]["properties"]
+            .as_object_mut()
+            .expect("static tool properties");
+        properties.insert("workspace".to_owned(), json!({"type":"string","description":"Workspace; por padrão usa o contexto de inicialização."}));
+        properties.insert("project".to_owned(), json!({"type":"string","description":"Projeto; obrigatório para sessões de outro projeto."}));
+        properties.insert("cwd".to_owned(), json!({"type":"string","description":"Diretório do projeto para resolver o marcador e remoto Git."}));
+    }
+    tools
 }
 
-fn call_tool(params: &Value) -> std::result::Result<Value, String> {
+fn call_tool(
+    params: &Value,
+    launch_context: &ProjectContext,
+) -> std::result::Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -203,20 +215,54 @@ fn call_tool(params: &Value) -> std::result::Result<Value, String> {
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let store = MemoryStore::new(default_data_dir());
+    for key in ["workspace", "project", "cwd"] {
+        if let Some(value) = args.get(key)
+            && !value.is_string()
+        {
+            return Err(format!("argumento '{key}' deve ser texto"));
+        }
+    }
+    let context = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+        super::resolve_context(
+            Path::new(cwd),
+            args.get("workspace").and_then(Value::as_str),
+            args.get("project").and_then(Value::as_str),
+        )
+        .map_err(|error| error.to_string())?
+    } else {
+        launch_context
+            .clone()
+            .with_overrides(
+                args.get("workspace").and_then(Value::as_str),
+                args.get("project").and_then(Value::as_str),
+            )
+            .map_err(|error| error.to_string())?
+    };
+    let store = MemoryStore::new(default_data_dir()).with_context(context.clone());
     let output = match name {
+        "memory_context" => {
+            let namespace = store
+                .namespace(&context.project)
+                .map_err(|error| error.to_string())?;
+            json!({"workspace":namespace.workspace,"project":namespace.project,
+                "workspace_id":namespace.workspace_id,"project_id":namespace.project_id,
+                "repository_identity":context.repository_identity,"marker":context.marker})
+            .to_string()
+        }
         "memory_status" => {
             let count = count_markdown(&store.root().join("wiki"));
-            let initialized = store.root().join("db/memory.sqlite").is_file();
+            let initialized = store.root().join("db/workspaces.sqlite").is_file();
             format!(
-                "Inicializado: {}. Diretório: {}. Páginas Markdown: {count}.",
+                "Inicializado: {}. Diretório: {}. Páginas Markdown: {count}. Workspace: {}. Projeto: {}.",
                 if initialized { "sim" } else { "não" },
-                store.root().display()
+                store.root().display(),
+                context.workspace,
+                context.project
             )
         }
         "memory_search" => {
             let query = required_string(&args, "query")?;
-            let scope = parse_scope(&required_string(&args, "scope")?)?;
+            let scope = parse_scope(required_string(&args, "scope")?)?;
             let hits = store
                 .search(query, &scope)
                 .map_err(|error| error.to_string())?;
@@ -234,7 +280,7 @@ fn call_tool(params: &Value) -> std::result::Result<Value, String> {
         "memory_remember" => {
             let record = MemoryRecord {
                 id: required_string(&args, "id")?.to_owned(),
-                scope: parse_scope(&required_string(&args, "scope")?)?,
+                scope: parse_scope(required_string(&args, "scope")?)?,
                 title: required_string(&args, "title")?.to_owned(),
                 body: required_string(&args, "body")?.to_owned(),
             };
@@ -243,7 +289,7 @@ fn call_tool(params: &Value) -> std::result::Result<Value, String> {
         }
         "memory_brief" => {
             let query = required_string(&args, "query")?;
-            let scope = parse_scope(&required_string(&args, "scope")?)?;
+            let scope = parse_scope(required_string(&args, "scope")?)?;
             let budget = args
                 .get("budget")
                 .and_then(Value::as_u64)

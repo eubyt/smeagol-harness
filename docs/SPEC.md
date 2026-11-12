@@ -3,6 +3,10 @@
 **Estado:** rascunho em implementação  
 **Implementação:** Rust, aplicação local de usuário único
 
+O armazenamento atual usa UUIDs por workspace/projeto, manifestos e índice
+reconstruível. O contrato implementado está em [`WORKSPACES.md`](WORKSPACES.md).
+Não há migração dos arquivos do formato anterior.
+
 ## 1. Objetivo
 
 Manter memória útil entre sessões e projetos de agentes de programação, com
