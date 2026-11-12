@@ -178,21 +178,34 @@ fn managed_handler(event: &str, agent: &str, binary: &std::path::Path) -> Value 
 }
 
 fn antigravity_command(binary: &std::path::Path, event: &str) -> String {
-    let executable = binary.display().to_string();
     #[cfg(windows)]
     {
-        // Antigravity's Windows hook runner passes the command through a shell
-        // that preserves quotes around the executable as part of its name.
-        // Avoid them for the normal Cargo install path (which has no spaces).
-        executable.trim_matches('"').to_owned() + &format!(" hook --agent antigravity --event {event}")
+        let wrapper = antigravity_wrapper_path(binary);
+        format!("{} {event}", shell_quote(&wrapper.display().to_string()))
     }
     #[cfg(not(windows))]
     {
+        let executable = binary.display().to_string();
         format!(
             "{} hook --agent antigravity --event {event}",
             shell_quote(&executable)
         )
     }
+}
+
+#[cfg(windows)]
+fn antigravity_wrapper_path(binary: &std::path::Path) -> PathBuf {
+    binary.with_file_name("smeagol-harness-antigravity.cmd")
+}
+
+#[cfg(windows)]
+fn write_antigravity_wrapper(binary: &std::path::Path) -> Result<PathBuf> {
+    let wrapper = antigravity_wrapper_path(binary);
+    let executable = binary.display().to_string().replace('%', "%%");
+    let contents = format!("@echo off\r\n\"{executable}\" hook --agent antigravity --event %*\r\n");
+    fs::write(&wrapper, contents)
+        .with_context(|| format!("falha ao gravar wrapper {}", wrapper.display()))?;
+    Ok(wrapper)
 }
 
 /// Merge native Gemini CLI hooks into the user's global settings.
@@ -249,6 +262,8 @@ pub fn apply_gemini_at(gemini_home: PathBuf, binary: &std::path::Path) -> Result
 
 /// Merge native Antigravity CLI hooks into `~/.gemini/config/hooks.json`.
 pub fn apply_antigravity_at(gemini_home: PathBuf, binary: &std::path::Path) -> Result<PathBuf> {
+    #[cfg(windows)]
+    write_antigravity_wrapper(binary)?;
     let hooks_file = gemini_home.join("config/hooks.json");
     let mut document = read_json_object(&hooks_file)?;
     let root = document
@@ -482,7 +497,7 @@ mod tests {
             r#"{"third-party":{"SessionStart":[{"type":"command","command":"echo keep"}]}}"#,
         )
         .unwrap();
-        let binary = temp.path().join("bin/smeagol-harness.exe");
+        let binary = temp.path().join("bin with spaces/smeagol-harness.exe");
         std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
         std::fs::write(&binary, "fixture").unwrap();
 
@@ -508,9 +523,15 @@ mod tests {
             .as_str()
             .unwrap();
         #[cfg(windows)]
-        assert!(!command.starts_with('"'), "{command}");
+        {
+            assert!(command.ends_with("smeagol-harness-antigravity.cmd\" PreInvocation"));
+            let wrapper = super::antigravity_wrapper_path(&binary);
+            let contents = std::fs::read_to_string(wrapper).unwrap();
+            assert!(contents.contains("smeagol-harness.exe\" hook --agent antigravity"));
+            assert!(contents.contains("bin with spaces"));
+        }
+        #[cfg(not(windows))]
         assert!(command.contains(" hook --agent antigravity --event PreInvocation"));
-        assert!(command.contains("smeagol-harness.exe"));
     }
 
     #[test]

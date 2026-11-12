@@ -128,8 +128,12 @@ impl MemoryStore {
         let claimed = directory.join(format!(".{name}.{}.{}.claimed", std::process::id(), nonce));
         match fs::rename(&source, &claimed) {
             Ok(()) => {
-                let content = fs::read_to_string(&claimed)
+                // Handoffs may have been written by older versions or external
+                // tools using the active Windows code page. Keep valid UTF-8,
+                // replacing undecodable bytes before returning text to agents.
+                let bytes = fs::read(&claimed)
                     .with_context(|| format!("falha ao ler handoff {}", claimed.display()))?;
+                let content = String::from_utf8_lossy(&bytes).into_owned();
                 fs::remove_file(&claimed)?;
                 Ok(Some(content))
             }
@@ -277,6 +281,20 @@ mod tests {
             Some("retomar implementação")
         );
         assert_eq!(store.claim_handoff("alpha").unwrap(), None);
+    }
+
+    #[test]
+    fn handoff_com_bytes_invalidos_e_lido_com_utf8_valido() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new(temp.path());
+        let handoffs = temp.path().join("handoffs");
+        std::fs::create_dir_all(&handoffs).unwrap();
+        std::fs::write(handoffs.join("alpha.md"), [b'a', 0xff, b'b']).unwrap();
+
+        let content = store.claim_handoff("alpha").unwrap().unwrap();
+
+        assert!(content.contains("a�b"));
+        assert!(content.is_char_boundary(content.len()));
     }
 
     #[test]
