@@ -1,0 +1,3 @@
+# Explicit routing for this repository's global Smeagol Harness memory store.
+workspace = "default"
+project = "smeagol-harness"
