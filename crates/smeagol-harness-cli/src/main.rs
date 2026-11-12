@@ -60,6 +60,16 @@ enum Command {
     /// Show the effective routing context and its immutable storage identifiers.
     #[command(about = "Mostra o workspace, projeto e identificadores de armazenamento")]
     Context,
+    /// Create an explicit project marker in the current directory.
+    #[command(about = "Gera o arquivo .smeagol-harness.toml no projeto atual")]
+    InitConfig {
+        #[arg(long, help = "Workspace a gravar no marcador")]
+        workspace: Option<String>,
+        #[arg(long, help = "Projeto a gravar no marcador")]
+        project: Option<String>,
+        #[arg(long, help = "Permite substituir um marcador existente")]
+        force: bool,
+    },
     /// Rebuild the derived index from namespaced Markdown and scope manifests.
     #[command(about = "Reconstrói o índice a partir das páginas e manifestos")]
     Reindex,
@@ -191,6 +201,26 @@ fn main() -> Result<()> {
                     "data_dir": store.root()
                 }))?
             );
+        }
+        Command::InitConfig {
+            workspace,
+            project,
+            force,
+        } => {
+            let path = std::env::current_dir()?.join(".smeagol-harness.toml");
+            if path.exists() && !force {
+                bail!("{} já existe; use --force para substituir", path.display());
+            }
+            let workspace = workspace.unwrap_or(context.workspace.clone());
+            let project = project.unwrap_or(context.project.clone());
+            smeagol_harness_core::validate_context_name(&workspace)?;
+            smeagol_harness_core::validate_context_name(&project)?;
+            let contents = format!(
+                "# Explicit routing for this repository's global Smeagol Harness memory store.\nworkspace = {workspace:?}\nproject = {project:?}\n"
+            );
+            std::fs::write(&path, contents)
+                .with_context(|| format!("falha ao gravar {}", path.display()))?;
+            println!("Configuração criada em {}", path.display());
         }
         Command::Reindex => println!("Páginas reindexadas: {}", store.reindex()?),
         Command::RenameProject { from, to } => {
