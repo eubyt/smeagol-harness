@@ -166,11 +166,33 @@ pub fn user_home_dir() -> Option<PathBuf> {
 
 fn managed_handler(event: &str, agent: &str, binary: &std::path::Path) -> Value {
     let name = format!("smeagol-harness:{agent}:{event}");
-    let command = format!(
-        "{} hook --agent {agent} --event {event}",
-        shell_quote(&binary.display().to_string())
-    );
+    let command = if agent == "antigravity" {
+        antigravity_command(binary, event)
+    } else {
+        format!(
+            "{} hook --agent {agent} --event {event}",
+            shell_quote(&binary.display().to_string())
+        )
+    };
     json!({"name": name, "type": "command", "command": command, "timeout": 5000})
+}
+
+fn antigravity_command(binary: &std::path::Path, event: &str) -> String {
+    let executable = binary.display().to_string();
+    #[cfg(windows)]
+    {
+        // Antigravity's Windows hook runner passes the command through a shell
+        // that preserves quotes around the executable as part of its name.
+        // Avoid them for the normal Cargo install path (which has no spaces).
+        executable.trim_matches('"').to_owned() + &format!(" hook --agent antigravity --event {event}")
+    }
+    #[cfg(not(windows))]
+    {
+        format!(
+            "{} hook --agent antigravity --event {event}",
+            shell_quote(&executable)
+        )
+    }
 }
 
 /// Merge native Gemini CLI hooks into the user's global settings.
@@ -482,6 +504,13 @@ mod tests {
             second["smeagol-harness-managed"]["PreToolUse"][0]["matcher"],
             ".*"
         );
+        let command = second["smeagol-harness-managed"]["PreInvocation"][0]["command"]
+            .as_str()
+            .unwrap();
+        #[cfg(windows)]
+        assert!(!command.starts_with('"'), "{command}");
+        assert!(command.contains(" hook --agent antigravity --event PreInvocation"));
+        assert!(command.contains("smeagol-harness.exe"));
     }
 
     #[test]
