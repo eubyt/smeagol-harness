@@ -186,8 +186,8 @@ mod tests {
             "acme-my-repo"
         );
         assert_eq!(
-            super::normalize_remote_identity("git@github.com:akitaonrails/ai-memory.git"),
-            "akitaonrails-ai-memory"
+            super::normalize_remote_identity("git@github.com:acme/my-repo.git"),
+            "acme-my-repo"
         );
     }
 
