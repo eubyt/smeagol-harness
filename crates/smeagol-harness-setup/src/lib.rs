@@ -164,6 +164,17 @@ pub fn user_home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Resolve Devin's global user configuration path without depending on cwd.
+pub fn devin_config_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            return Some(PathBuf::from(app_data).join("devin/config.json"));
+        }
+    }
+    user_home_dir().map(|home| home.join(".config/devin/config.json"))
+}
+
 fn managed_handler(event: &str, agent: &str, binary: &std::path::Path) -> Value {
     let name = format!("smeagol-harness:{agent}:{event}");
     let command = if agent == "antigravity" {
@@ -328,6 +339,55 @@ pub fn apply_antigravity_at(gemini_home: PathBuf, binary: &std::path::Path) -> R
     Ok(hooks_file)
 }
 
+/// Merge Devin CLI hooks into the user's global configuration.
+pub fn apply_devin_at(config_file: PathBuf, binary: &std::path::Path) -> Result<PathBuf> {
+    let mut document = read_json_object(&config_file)?;
+    let root = document
+        .as_object_mut()
+        .context("config.json precisa conter um objeto")?;
+    let hooks = root
+        .entry("hooks".to_owned())
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .context("config.json: 'hooks' precisa ser um objeto")?;
+    for event in [
+        "PreToolUse",
+        "PostToolUse",
+        "PermissionRequest",
+        "UserPromptSubmit",
+        "Stop",
+        "PostCompaction",
+        "SessionStart",
+        "SessionEnd",
+    ] {
+        let groups = hooks
+            .entry(event.to_owned())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .with_context(|| format!("hooks.{event} precisa ser uma lista"))?;
+        for group in groups.iter_mut() {
+            if let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) {
+                handlers.retain(|handler| {
+                    !handler
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.starts_with("smeagol-harness:devin:"))
+                });
+            }
+        }
+        groups.retain(|group| {
+            group
+                .get("hooks")
+                .and_then(Value::as_array)
+                .is_none_or(|hooks| !hooks.is_empty())
+        });
+        let handler = managed_handler(event, "devin", binary);
+        groups.push(json!({"hooks": [handler]}));
+    }
+    write_json_atomic(&config_file, &document)?;
+    Ok(config_file)
+}
+
 fn is_our_antigravity_group(group: &Value) -> bool {
     group.as_object().is_some_and(|events| {
         events.values().all(|value| {
@@ -408,7 +468,9 @@ fn atomic_replace(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_antigravity_at, apply_codex_at, apply_gemini_at, plan_codex_at};
+    use super::{
+        apply_antigravity_at, apply_codex_at, apply_devin_at, apply_gemini_at, plan_codex_at,
+    };
     use serde_json::Value;
 
     #[test]
@@ -569,5 +631,33 @@ mod tests {
 
         assert!(apply_antigravity_at(temp.path().to_path_buf(), &binary).is_err());
         assert_eq!(std::fs::read(hooks).unwrap(), before);
+    }
+
+    #[test]
+    fn installs_devin_hooks_globally_and_preserves_other_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join("devin/config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            r#"{"model":"keep-me","hooks":{"UserPromptSubmit":[{"hooks":[{"name":"third-party","type":"command","command":"echo keep"}]}]}}"#,
+        )
+        .unwrap();
+        let binary = std::path::Path::new("/opt/tools/smeagol harness");
+        apply_devin_at(config.clone(), binary).unwrap();
+        apply_devin_at(config.clone(), binary).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+        assert_eq!(document["model"], "keep-me");
+        assert_eq!(
+            document["hooks"]["UserPromptSubmit"][0]["hooks"][0]["name"],
+            "third-party"
+        );
+        let start = &document["hooks"]["SessionStart"];
+        assert_eq!(start.as_array().unwrap().len(), 1);
+        assert_eq!(
+            start[0]["hooks"][0]["name"],
+            "smeagol-harness:devin:SessionStart"
+        );
     }
 }

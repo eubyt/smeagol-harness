@@ -11,7 +11,8 @@ use smeagol_harness_hooks::{
     Observation, append_observation, observation_from_codex, read_observations,
 };
 use smeagol_harness_setup::{
-    apply_antigravity_at, apply_codex_at, apply_gemini_at, plan_codex, user_home_dir,
+    apply_antigravity_at, apply_codex_at, apply_devin_at, apply_gemini_at, devin_config_path,
+    plan_codex, user_home_dir,
 };
 use smeagol_harness_store::{MemoryStore, default_data_dir};
 
@@ -42,8 +43,8 @@ enum Command {
     #[command(about = "Mostra o plano de integração sem alterar configurações")]
     Setup {
         /// Agent whose hooks should be configured.
-        #[arg(help = "Agente para instalar hooks: codex, gemini-cli, antigravity ou all")]
-        #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity", "all"])]
+        #[arg(help = "Agente para instalar hooks: codex, gemini-cli, antigravity, devin ou all")]
+        #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity", "devin", "all"])]
         agent: String,
         #[arg(long, conflicts_with = "apply")]
         plan: bool,
@@ -105,7 +106,7 @@ enum Command {
     /// Handle an agent lifecycle hook payload from stdin.
     #[command(about = "Executa o adaptador chamado pelos hooks do Codex")]
     Hook {
-        #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity"])]
+        #[arg(long, default_value = "codex", value_parser = ["codex", "gemini-cli", "gemini", "antigravity", "devin"])]
         agent: String,
         #[arg(long)]
         event: String,
@@ -162,7 +163,7 @@ fn main() -> Result<()> {
                 let binary =
                     std::env::current_exe().context("não foi possível localizar o executável")?;
                 for target in if agent == "all" {
-                    vec!["codex", "gemini-cli", "antigravity"]
+                    vec!["codex", "gemini-cli", "antigravity", "devin"]
                 } else if agent == "gemini" {
                     vec!["gemini-cli"]
                 } else {
@@ -301,6 +302,13 @@ fn install_hooks(agent: &str, binary: &Path) -> Result<()> {
             println!("Hooks do Antigravity instalados em {}", path.display());
             println!("Reinicie o Antigravity CLI e revise os hooks com /hooks.");
         }
+        "devin" => {
+            let path = devin_config_path()
+                .context("não foi possível localizar a configuração global do Devin")?;
+            let path = apply_devin_at(path, binary)?;
+            println!("Hooks do Devin CLI instalados em {}", path.display());
+            println!("Reinicie o Devin CLI e revise os hooks com /hooks.");
+        }
         _ => bail!("agente não suportado: {agent}"),
     }
     Ok(())
@@ -340,6 +348,7 @@ fn handle_hook(
                 .and_then(serde_json::Value::as_str)
                 .map(PathBuf::from)
         })
+        .or_else(|| std::env::var_os("DEVIN_PROJECT_DIR").map(PathBuf::from))
         .unwrap_or(std::env::current_dir()?);
     let context = resolve_context(&cwd, workspace, project)?;
     let data_dir = default_data_dir();
@@ -433,6 +442,14 @@ fn canonical_hook_event(agent: &str, event: &str) -> Result<&'static str> {
         ("antigravity", "PreToolUse") => "PreToolUse",
         ("antigravity", "PostToolUse") => "PostToolUse",
         ("antigravity", "Stop") => "Stop",
+        ("devin", "PreToolUse") => "PreToolUse",
+        ("devin", "PostToolUse") => "PostToolUse",
+        ("devin", "PermissionRequest") => "PermissionRequest",
+        ("devin", "UserPromptSubmit") => "UserPromptSubmit",
+        ("devin", "Stop") => "Stop",
+        ("devin", "PostCompaction") => "PostCompaction",
+        ("devin", "SessionStart") => "SessionStart",
+        ("devin", "SessionEnd") => "SessionEnd",
         _ => bail!("evento '{event}' não é suportado para o agente '{agent}'"),
     };
     Ok(canonical)
@@ -443,7 +460,7 @@ fn emit_empty_hook_result(agent: &str, event: &str) {
         ("gemini" | "gemini-cli", _) => Some(serde_json::json!({})),
         ("antigravity", "PreToolUse") => Some(serde_json::json!({"decision":"allow"})),
         ("antigravity", "Stop") => Some(serde_json::json!({"decision":"allow"})),
-        ("antigravity", _) => Some(serde_json::json!({})),
+        ("antigravity", _) | ("devin", _) => Some(serde_json::json!({})),
         _ => None,
     };
     if let Some(output) = output {
@@ -478,6 +495,11 @@ fn print_plan(agent: &str) -> Result<()> {
         let home = user_home_dir().context("não foi possível localizar a pasta do usuário")?;
         let hooks = home.join(".gemini/config/hooks.json");
         println!("Antigravity CLI (somente leitura): {}", hooks.display());
+    }
+    if matches!(agent, "devin" | "all") {
+        let path = devin_config_path()
+            .context("não foi possível localizar a configuração global do Devin")?;
+        println!("Devin CLI (somente leitura): {}", path.display());
     }
     Ok(())
 }

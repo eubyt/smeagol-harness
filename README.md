@@ -55,5 +55,6 @@ junto com a sessão. Para iniciar um servidor independente, rode
 endereço configurado e publica o endpoint `/mcp`.
 
 `setup --agent gemini-cli --apply` instala hooks globais do Gemini CLI;
-`setup --agent antigravity --apply` instala os hooks do Antigravity CLI. Use
-`setup --agent all --apply` para instalar Codex, Gemini CLI e Antigravity.
+`setup --agent antigravity --apply` instala os hooks do Antigravity CLI.
+`setup --agent devin --apply` instala hooks globais do Devin CLI.
+Use `setup --agent all --apply` para instalar Codex, Gemini CLI, Antigravity e Devin.

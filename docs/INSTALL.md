@@ -61,11 +61,14 @@ uma vez como contexto histórico. Os dados ficam em
 `$SMEAGOL_HARNESS_HOME` (com suporte legado a `$ADRIAN_HARNESS_HOME`),
 `$XDG_DATA_HOME/smeagol-harness` ou `~/.local/share/smeagol-harness`, nessa ordem.
 
-O seletor `--agent` aceita `codex`, `gemini-cli`, `antigravity` ou `all`.
+O seletor `--agent` aceita `codex`, `gemini-cli`, `antigravity`, `devin` ou `all`.
 Os arquivos globais usados são `hooks.json` do Codex,
 `~/.gemini/settings.json` do Gemini CLI e `~/.gemini/config/hooks.json` do
 Antigravity CLI. Reinicie cada agente depois da instalação; no Gemini CLI
 confira `/hooks panel` e no Antigravity CLI `/hooks`.
+Os hooks do Devin CLI são sempre globais e ficam em
+`~/.config/devin/config.json` (ou `%APPDATA%\\devin\\config.json` no Windows).
+O instalador não usa `.devin/` dentro do repositório.
 
 O Gemini captura início/fim de sessão, prompts, ferramentas e compactação. O
 Antigravity captura início de sessão, invocações do modelo e ferramentas; o CLI
