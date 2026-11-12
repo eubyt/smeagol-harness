@@ -1,0 +1,11 @@
+[package]
+name = "smeagol-harness-consolidate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+smeagol-harness-core.workspace = true
+smeagol-harness-hooks.workspace = true
+anyhow.workspace = true

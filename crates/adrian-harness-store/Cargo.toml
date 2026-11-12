@@ -1,0 +1,14 @@
+[package]
+name = "smeagol-harness-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+smeagol-harness-core.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "smeagol-harness-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "smeagol-harness"
+path = "src/main.rs"
+
+[dependencies]
+smeagol-harness-core.workspace = true
+smeagol-harness-consolidate.workspace = true
+smeagol-harness-hooks.workspace = true
+smeagol-harness-setup.workspace = true
+serde_json.workspace = true
+smeagol-harness-store.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
